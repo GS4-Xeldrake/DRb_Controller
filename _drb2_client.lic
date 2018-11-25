@@ -1,0 +1,140 @@
+require 'drb'
+require 'thread'
+
+#------------------------------------------------------------------------------
+# Globals
+#------------------------------------------------------------------------------
+
+$server_uri  = 'druby://localhost'
+$server_port = 45000
+$character   = "Rabbits"
+
+#------------------------------------------------------------------------------
+# Classes
+#------------------------------------------------------------------------------
+
+class Stack
+  MAX_BOTS = 10
+
+  attr_reader :stack, :controller
+  attr_accessor :has_job
+
+  def initialize(controller)
+    @controller = controller
+    @stack      = []
+    @has_job    = false
+
+    @bots       = {}
+  end
+
+  def add_to_stack(obj)
+    @stack << obj
+    @stack = @stack.sort_by {|priority| priority[:priority]}
+  end
+
+  def lifo_stack
+    @stack.pop
+  end
+
+  def fifo_stack
+    @stack.shift
+  end
+
+end
+
+#------------------------------------------------------------------------------
+
+class DRBSRVInfo
+
+  attr_reader :pool_status
+
+  def initialize(server_uri, server_port, character)
+    @server_stack   = nil
+    @pool_status    = {}
+
+    #--------------------------------------------------------------------------
+    # try to add character to the pool
+
+    set_server_connect(server_uri, server_port, character)
+  end
+
+  def set_server_connect(server_uri, server_port, character)
+
+    # connection to remote object and return
+    @server_stack = DRbObject.new(nil, "#{server_uri}:#{server_port}")
+
+    begin
+      # if character checks in properly, returns hash of connect info
+      @pool_status = @server_stack.check_in(character)
+
+    rescue
+      puts "COULD NOT CONNECT TO SERVER..."
+      puts "Ensure the server is running before starting the client!"
+    end
+
+  end
+
+  private :set_server_connect
+end
+
+#------------------------------------------------------------------------------
+
+class DRB
+  # class DRB is the default container for running the local DRB for each
+  # client. It's designed to share out the stack for remote method calling
+
+  attr_reader :port, :shared, :drb_thread
+
+  def initialize(name, uri, port, shared)
+    @uri          = uri     # host IP or hostname
+    @port         = port    # port for remote users to connect to
+
+    @shared_stack = nil     # the shared object pointer
+    @drb_thread   = nil     # for checking thread status
+    @drb_service  = nil     # the handle to start and stop the service
+
+    #--------------------------------------------------------------------------
+    # Start up the DRb service object
+
+    set_drb_service(@uri, @port, shared)
+
+  end
+
+  def set_drb_service(uri, port, shared)
+    # start the DRb service...
+    @drb_service  = DRb.start_service("#{uri}:#{port}", shared)
+    # join the DRb thread so it doesn't quit running
+    @drb_thread   = Thread.new{@drb_service.thread.join}
+    # assign a pointer for the shared object
+    @shared_stack = DRbObject.new(nil, "#{uri}:#{port}")
+  end
+
+  def kill_drb_service
+    # Halt the DRb service via the handle
+    @drb_service.stop_service()
+    # Kill the runtime thread for the DRb object
+    @drb_thread.kill
+  end
+
+  private :set_drb_service
+end
+
+#------------------------------------------------------------------------------
+#  Main
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# Attempt to connect to server
+
+drb_server = DRBSRVInfo.new($server_uri, $server_port, $character)
+
+# if client connects start the process else close out the client
+
+if drb_server.pool_status["added"] == true
+  puts drb_server.pool_status
+  #client_stack = DRB.new()
+else
+  puts drb_server.pool_status["message"]
+  puts "Closing client..."
+end
+

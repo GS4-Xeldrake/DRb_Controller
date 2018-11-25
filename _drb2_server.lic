@@ -1,0 +1,212 @@
+require 'drb'
+require 'thread'
+
+#------------------------------------------------------------------------------
+# Globals
+#------------------------------------------------------------------------------
+
+$main_drb_port  = 45000
+$drb_uri        = "druby://localhost"
+$controller     = "Nips" #Char.name
+
+#------------------------------------------------------------------------------
+# Classes
+#------------------------------------------------------------------------------
+
+class Stack
+  MAX_BOTS      = 10
+  MIN_PORT      = 45001
+  MAX_PORT = MIN_PORT + MAX_BOTS
+
+  attr_reader :stack, :controller
+  attr_accessor :has_job
+
+  def initialize(controller)
+    @controller = controller
+    @stack      = []
+    @has_job    = false
+
+    @bots       = {}
+  end
+
+  def add_to_stack(obj)
+    @stack << obj
+    @stack = @stack.sort_by {|priority| priority[:priority]}
+  end
+
+  def lifo_stack
+    @stack.pop
+  end
+
+  def fifo_stack
+    @stack.shift
+  end
+
+  def check_in(character, bots = @bots)
+    # attempt to be added to the controller, providing not exceeding MAX_BOTS
+
+    check_in_row              = {}              # to store info about the bot
+    check_in_row["bot_count"] = bots.keys.count
+    check_in_row["added"]     = false
+
+    # ensure that bot does not exceed max allowed bots
+    if check_in_row["bot_count"] < (MAX_PORT - MIN_PORT)
+
+      case bots.has_key?(character) # is character in bots hash...
+
+        when true  # if character already joined the bots pool
+
+          check_in_row["message"] = "Sorry, you previously joined pool, port [#{@bots[character]}]"
+          return check_in_row
+
+        when false # character not in the pool, add him or her
+
+          for port in MIN_PORT..MAX_PORT
+            cur_port = port
+
+            if !bots.has_value?(cur_port)
+              puts "Adding player [#{character}] to port [#{cur_port}]"
+
+              @bots[character] = MIN_PORT + check_in_row["bot_count"]
+
+              check_in_row["added"]   = true
+              check_in_row["message"] = "Character added, port [#{@bots[character]}]"
+              check_in_row[character] = @bots[character]
+
+              break # spot found, break out of loop
+            else
+
+              check_in_row["message"] ="Port #{cur_port} in use..."
+
+            end
+          end
+
+          return check_in_row
+      end
+    else # no more spots left
+
+      check_in_row["message"] = "Sorry, no more spots available!"
+      return check_in_row
+    end
+
+  end
+end
+
+#------------------------------------------------------------------------------
+class ThreadFacility
+
+  RUNTIME_THREAD = 500
+
+  @@running_threads = {}
+
+  def initialize
+    @runtime_thread = nil
+
+    start_runtime_thread
+  end
+
+  def start_runtime_thread
+    @runtime_thread = Thread.new {
+
+      puts "Initializing runtime thread..."
+
+      start_time = Time.new
+
+      while true do
+        time_hash = {}
+
+        puts "Runtime thread loop, sleeping #{RUNTIME_THREAD} seconds..."
+
+        sleep RUNTIME_THREAD
+
+        current_time = Time.new
+
+        time_hash[:seconds] = ((current_time - start_time) % 60).to_i
+        time_hash[:minutes] = ((current_time - start_time) / 60).to_i
+
+        puts "Server has been up for..."
+        puts "[#{time_hash[:minutes]}] Minute(s) and [#{time_hash[:seconds]}] second(s)."
+
+
+        puts "Here's your XP:"
+
+      end
+
+    }
+
+    @@running_threads["run time"] = @runtime_thread
+  end
+
+  def get_threads
+    @@running_threads
+  end
+
+  private :start_runtime_thread
+end
+
+#------------------------------------------------------------------------------
+
+class DRB
+  @@threads = []
+
+  attr_reader :controller, :port, :shared
+
+  def initialize(name, uri, port, shared)
+    @controller   = name
+    @uri          = uri
+    @port         = port
+    @shared       = shared
+    @drb_thread   = nil
+    @drb_service  = nil
+    @server_stack = nil
+
+    set_drb_service(@uri, @port, @shared)
+  end
+
+  def set_drb_service(uri, port, shared)
+    @drb_service  = DRb.start_service("#{uri}:#{port}", shared)
+    @drb_thread   = Thread.new{@drb_service.thread.join}
+    #@server_stack = DRbObject.new(nil, "#{uri}:#{port}")
+
+    @@threads << @drb_thread
+  end
+
+  def kill_drb_service
+    @drb_service.stop_service()
+    @drb_thread.kill
+  end
+
+  def get_threads
+    @@threads
+  end
+
+  private :set_drb_service
+end
+
+#------------------------------------------------------------------------------
+# Main
+#------------------------------------------------------------------------------
+
+server_stack = Stack.new($controller)
+drb_obj      = DRB.new($controller, $drb_uri, $main_drb_port, server_stack)
+threads      = ThreadFacility.new
+
+#------------------------------------------------------------------------------
+#  Join all threads so they do not close
+#------------------------------------------------------------------------------
+
+threads.get_threads.each do |key, value|
+  value.join
+end
+
+
+#valid_skills = Skills
+#echo valid_skills.public_methods
+#echo Skills.__id__
+#echo GameObj.public_methods
+#echo XMLData.public_methods
+#all_spells = Spells.known
+
+#all_spells.each {|spell| echo spell.num}
+
+#DRb.start_service()
